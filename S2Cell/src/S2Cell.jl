@@ -1,20 +1,21 @@
-
 module S2Cell
-#
-# s2cell exceptions
-#
 using Markdown
+using Printf
 
 md"""Exception type for invalid cell IDs."""
-struct InvalidCellID <: Exception end
+struct InvalidCellID <: Exception
+    msg:: String
+end
 
 
 md"""Exception type for invalid tokens."""
-struct InvalidToken <: Exception end
+struct InvalidToken <: Exception
+    msg:: String
+end
 
 md"""An S2 cell ID is an integer we package for type-checing"""
 struct Cell
-    id::UInt32
+    id::UInt64
 end
 
 #
@@ -87,7 +88,7 @@ function _s2_uv_to_st(component:: Real) :: Real
     if component >= 0.0
         return 0.5 * sqrt(1.0 + 3.0 * component)
     else
-        return 1.0 - 0.5 * math.sqrt(1.0 - 3.0 * component)
+        return 1.0 - 0.5 * sqrt(1.0 - 3.0 * component)
     end
 end
 
@@ -123,7 +124,7 @@ See s2geometry/blob/2c02e21040e0b82aa5719e96033d02b8ce7c0eff/src/s2/s2coords.h#L
 function _s2_st_to_ij(component:: Real) :: Int
     # The reference implementation does round(_S2_MAX_SIZE * component - 0.5), which is equivalent
     # to math.floor(_S2_MAX_SIZE * component)
-    return int(max(0, min(_S2_MAX_SIZE - 1, math.floor(_S2_MAX_SIZE * component))))
+    return Int(max(0, min(_S2_MAX_SIZE - 1, floor(_S2_MAX_SIZE * component))))
 end
 
 md"""
@@ -154,7 +155,7 @@ Raises:
     ValueError: If the face is not valid in range 0-5.
 
 """
-function _s2_face_uv_to_xyz(face:: Int, uv:: Tuple{<:Real,<:Real}):: Tuple{<:Real,<:Real}
+function _s2_face_uv_to_xyz(face:: Integer, uv:: Tuple{<:Real,<:Real}):: Tuple{<:Real,<:Real,<:Real}
     # Face -> XYZ components -> indices with negation:
     # 0    -> ( 1,  u,  v)   -> ( /,  0,  1)
     # 1    -> (-u,  1,  v)   -> (-0,  /,  1)
@@ -163,19 +164,19 @@ function _s2_face_uv_to_xyz(face:: Int, uv:: Tuple{<:Real,<:Real}):: Tuple{<:Rea
     # 4    -> ( v, -1, -u)   -> ( 1, -/, -0)    not index -1
     # 5    -> ( v,  u, -1)   -> ( 1,  0, -/)
     if face == 0
-        s2_point = (1, uv[0], uv[1])
+        s2_point = (1, uv[1], uv[2])
     elseif face == 1
-        s2_point = (-uv[0], 1, uv[1])
+        s2_point = (-uv[1], 1, uv[2])
     elseif face == 2
-        s2_point = (-uv[0], -uv[1], 1)
+        s2_point = (-uv[1], -uv[2], 1)
     elseif face == 3
-        s2_point = (-1, -uv[1], -uv[0])
+        s2_point = (-1, -uv[2], -uv[1])
     elseif face == 4
-        s2_point = (uv[1], -1, -uv[0])
+        s2_point = (uv[2], -1, -uv[1])
     elseif face == 5
-        s2_point = (uv[1], uv[0], -1)
+        s2_point = (uv[2], uv[1], -1)
     else
-        throw(ValueError("Cannot convert UV to XYZ with invalid face: {}".format(face)))
+        throw(ArgumentError("Cannot convert UV to XYZ with invalid face: $face"))
     end
 
     return s2_point
@@ -204,14 +205,16 @@ Raises:
     TypeError: If the cell_id is not int.
 
 """
-function cell_id_to_token(cell_id:: Cell)::String
+cell_id_to_token(cell:: Cell)::String = cell_id_to_token(cell.id)
+
+function cell_id_to_token(cell_id:: UInt64)::String
     # The zero token is encoded as 'X' rather than as a zero-length string
     if cell_id == 0
-        return 'X'
+        return "X"
     end
 
     # Convert cell ID to 16 character hex string and strip any implicit trailing zeros
-    return "{:016x}".format(cell_id).rstrip("0")
+    return rstrip((@sprintf "%016x" cell_id), '0')
 end
 
 md"""
@@ -232,27 +235,22 @@ Raises:
     InvalidToken: If the token length is over 16.
 
 """
-function token_to_cell_id(token:: String) ::Int
-    # Check input
-    if not isinstance(token, String)
-        throw(TypeError("Cannot convert S2 token from type: {}".format(type(token))))
-    end
-
-    if len(token) > 16
+function token_to_cell_id(token:: String)::Cell
+    if length(token) == 0 || length(token) > 16
         throw(InvalidToken("Cannot convert S2 token with length > 16 characters"))
     end
 
     # Check for the zero cell ID represented by the character 'x' or 'X' rather than as the empty
     # string
     if lowercase(token) == "x"
-        return 0
+        return Cell(0)
     end
 
     # Add stripped implicit zeros to create the full 16 character hex string
-    token = token + ('0' ^ (16 - length(token)))
+    token = token * ('0' ^ (16 - length(token)))
 
     # Convert to cell ID by converting hex to int
-    return int(token, 16)
+    return Cell(parse(UInt64, "0x" * token))
 end
 
 #
@@ -276,9 +274,9 @@ Raises:
     ValueError: When level is not an integer, is < 0 or is > 30.
 
 """
-function lat_lon_to_cell_id(lat:: Real, lon:: Real, level:: Int = 30)::Int
-    if not isinstance(level, int) || level < 0 || level > _S2_MAX_LEVEL
-        throw(ValueError("S2 level must be integer >= 0 and <= 30"))
+function lat_lon_to_cell_id(lat :: Real, lon :: Real, level :: Integer = 30)::Cell 
+    if level < 0 || level > _S2_MAX_LEVEL
+        throw(ArgumentError("S2 level must be integer >= 0 and <= 30"))
     end
 
     # Populate _S2_LOOKUP_POS on first run.
@@ -288,12 +286,12 @@ function lat_lon_to_cell_id(lat:: Real, lon:: Real, level:: Int = 30)::Int
     # new orientation
 
     # Reuse constant expressions
-    lat_rad = math.radians(lat)
-    lon_rad = math.radians(lon)
-    sin_lat_rad = math.sin(lat_rad)
-    cos_lat_rad = math.cos(lat_rad)
-    sin_lon_rad = math.sin(lon_rad)
-    cos_lon_rad = math.cos(lon_rad)
+    lat_rad = deg2rad(lat)
+    lon_rad = deg2rad(lon)
+    sin_lat_rad = sin(lat_rad)
+    cos_lat_rad = cos(lat_rad)
+    sin_lon_rad = sin(lon_rad)
+    cos_lon_rad = cos(lon_rad)
 
     # Convert to S2Point
     # This is effectively the unit non-geodetic ECEF vector
@@ -315,8 +313,8 @@ function lat_lon_to_cell_id(lat:: Real, lon:: Real, level:: Int = 30)::Int
     # -x -> 3
     # -y -> 4
     # -z -> 5
-    face = maximum(abs.(s2_point))
-    if s2_point[face] < 0.0
+    face = findmax(abs.(s2_point))[2] - 1
+    if s2_point[face + 1] < 0.0
         face += 3
     end
 
@@ -333,34 +331,27 @@ function lat_lon_to_cell_id(lat:: Real, lon:: Real, level:: Int = 30)::Int
     # 4 -> ( z, -x) -> ( 2, -0)
     # 5 -> (-y, -x) -> (-1, -0)
     #
-    # For a compiled language, a switch statement on face is preferable as it will be more easily
-    # optimised as a jump table etc; but in Python the indexing method is more concise.
-    #
-    # The index selection can be reduced to some bit magic:
-    # U: 1 - ((face + 1) >> 1)
-    # V: 2 - (face >> 1)
-    #
-    # The negation of the the two components is then selected:
-    # U: (face in [1, 2, 5]) ? -1: 1
-    # V: (face in [2, 4, 5])) ? -1: 1
-    uv = (
-        s2_point[1 - ((face + 1) >> 1)] / s2_point[face % 3],  # U
-        s2_point[2 - (face >> 1)] / s2_point[face % 3]         # V
-    )
-    if face in (1, 2, 5)
-        uv = (-uv[0], uv[1])  # Negate U
-    end
-    if face in (2, 4, 5) 
-        uv = (uv[0], -uv[1])  # Negate V
+    if face == 0
+        uv =  (s2_point[2] / s2_point[1], s2_point[3] / s2_point[1])
+    elseif face == 1
+        uv = (-s2_point[1] / s2_point[2], s2_point[3] / s2_point[2])
+    elseif face == 2
+        uv = (-s2_point[1] / s2_point[3], -s2_point[2] / s2_point[3])
+    elseif face == 3
+        uv = (s2_point[3] / s2_point[1], s2_point[2] / s2_point[1])
+    elseif face == 4
+        uv = (s2_point[3] / s2_point[2], -s2_point[1] / s2_point[2])
+    else
+        uv = ( -s2_point[2] / s2_point[3], -s2_point[1] / s2_point[3])
     end
 
     # Project cube-space UV to cell-space ST
     # See s2geometry/blob/2c02e21040e0b82aa5719e96033d02b8ce7c0eff/src/s2/s2coords.h#L317-L320
-    st = (_s2_uv_to_st(uv[0]), _s2_uv_to_st(uv[1]))  # pylint: disable=invalid-name
+    st = (_s2_uv_to_st(uv[1]), _s2_uv_to_st(uv[2]))
 
     # Convert ST to IJ integers
     # See s2geometry/blob/2c02e21040e0b82aa5719e96033d02b8ce7c0eff/src/s2/s2coords.h#L333-L336
-    ij = (_s2_st_to_ij(st[0]), _s2_st_to_ij(st[1]))  # pylint: disable=invalid-name
+    ij = (_s2_st_to_ij(st[1]), _s2_st_to_ij(st[2]))  # pylint: disable=invalid-name
 
     # Convert face + IJ to cell ID
     # See s2geometry/blob/c59d0ca01ae3976db7f8abdc83fcc871a3a95186/src/s2/s2cell_id.cc#L256-L298
@@ -380,21 +371,21 @@ function lat_lon_to_cell_id(lat:: Real, lon:: Real, level:: Int = 30)::Int
     # additional 2 levels added are required to account for the top 3 bits (4 before right shift)
     # that are occupied by the face bits.
     bits = face & _S2_SWAP_MASK  # iiiijjjjoo. Initially set by by face
-    cell_id = face << (_S2_POS_BITS - 1)  # Insert face at second most signficant bits
-    lookup_mask = (1 << int(_S2_LOOKUP_BITS)) - 1  # Mask of 4 one bits: 0b1111
+    cell_id = UInt64(face << (_S2_POS_BITS - 1))  # Insert face at second most signficant bits
+    lookup_mask = (1 << _S2_LOOKUP_BITS) - 1  # Mask of 4 one bits: 0b1111
     if level > 0
-        required_steps = math.ceil((level + 2) / 4)
+        required_steps = Int(ceil((level + 2) / 4))
     else
         required_steps = 0
     end
     for k in 7:-1:(7 - required_steps)
         # Grab 4 bits of each of I and J
         offset = k * _S2_LOOKUP_BITS
-        bits += ((ij[0] >> offset) & lookup_mask) << (_S2_LOOKUP_BITS + 2)
-        bits += ((ij[1] >> offset) & lookup_mask) << 2
+        bits += ((ij[1] >> offset) & lookup_mask) << (_S2_LOOKUP_BITS + 2)
+        bits += ((ij[2] >> offset) & lookup_mask) << 2
 
         # Map bits from iiiijjjjoo to ppppppppoo using lookup table
-        bits = _S2_LOOKUP_POS[bits]
+        bits = _S2_LOOKUP_POS[bits + 1]
 
         # Insert position bits into cell ID
         cell_id |= (bits >> 2) << (k * 2 * _S2_LOOKUP_BITS)
@@ -407,7 +398,7 @@ function lat_lon_to_cell_id(lat:: Real, lon:: Real, level:: Int = 30)::Int
     # The trailing bit addition is disabled, as we are overwriting this below in the truncation
     # anyway. This line is kept as an example of the full method for S2 cell ID creation as is done
     # in the standard library versions.
-    cell_id = cell_id << 1  # + 1
+    cell_id = cell_id << 1 
 
     # Truncate to desired level
     # This is done by finding the mask of the trailing 1 bit for the specified level, then zeroing
@@ -418,7 +409,7 @@ function lat_lon_to_cell_id(lat:: Real, lon:: Real, level:: Int = 30)::Int
     least_significant_bit_mask = 1 << (2 * (_S2_MAX_LEVEL - level))
     cell_id = (cell_id & -least_significant_bit_mask) | least_significant_bit_mask
 
-    return cell_id
+    return Cell(cell_id)
 end
 
 md"""
@@ -443,7 +434,7 @@ Raises:
     ValueError: When level is not an integer, is < 0 or is > 30.
 
 """
-function lat_lon_to_token(lat:: Real, lon:: Real, level:: Int = 30)::String
+function lat_lon_to_token(lat:: Real, lon:: Real, level:: Integer = 30)::String 
     # Generate cell ID and convert to token
     return cell_id_to_token(lat_lon_to_cell_id(lat, lon, level))
 end
@@ -466,10 +457,12 @@ Raises:
     InvalidCellID: If the cell_id is invalid.
 
 """
-function cell_id_to_lat_lon(cell_id:: Int):: Tuple
+cell_id_to_lat_lon(cell:: Cell):: Tuple{<:Real, <:Real} = cell_id_to_lat_lon(cell.id)
+
+function cell_id_to_lat_lon(cell_id:: UInt64):: Tuple{<:Real, <:Real}
     # Check input
-    if not cell_id_is_valid(cell_id)
-        throw(InvalidCellID("Cannot decode invalid S2 cell ID: {}".format(cell_id)))
+    if ! cell_id_is_valid(cell_id)
+        throw(InvalidCellID("Cannot decode invalid S2 cell ID: $cell_id"))
     end
 
     # Populate _S2_LOOKUP_IJ on first run.
@@ -532,7 +525,7 @@ function cell_id_to_lat_lon(cell_id:: Int):: Tuple
         bits += ((cell_id >> (k * 2 * _S2_LOOKUP_BITS + 1)) & extract_mask) << 2
 
         # Map bits from ppppppppoo to iiiijjjjoo using lookup table
-        bits = _S2_LOOKUP_IJ[bits]
+        bits = _S2_LOOKUP_IJ[bits + 1]
 
         # Extract I and J bits
         offset = k * _S2_LOOKUP_BITS
@@ -551,26 +544,25 @@ function cell_id_to_lat_lon(cell_id:: Int):: Tuple
     # _S2_MAX_SI_TI. The extra power of 2 over IJ allows for identifying both the center and edge of
     # cells, whilst IJ is just the leaf cells.
     # See s2geometry/blob/c59d0ca01ae3976db7f8abdc83fcc871a3a95186/src/s2/s2coords.h#L57-L65
-    is_leaf = (cell_id & 1)  # Cell is leaf cell when trailing one bit is in LSB
-    apply_correction = !is_leaf & ((i ^ (cell_id >> 2)) & 1)
+    is_leaf = Bool(cell_id & 1)  # Cell is leaf cell when trailing one bit is in LSB
+    apply_correction = !is_leaf && Bool((i ⊻ (cell_id >> 2)) & 1)
     if is_leaf
         correction_delta = 1
     else
         correction_delta = apply_correction ? 2 : 0
     end
-    si = (i << 1) + correction_delta  # pylint: disable=invalid-name
-    ti = (j << 1) + correction_delta  # pylint: disable=invalid-name
+    si = (i << 1) + correction_delta
+    ti = (j << 1) + correction_delta
 
     # Convert integer si/ti to double ST
     # See s2geometry/blob/c59d0ca01ae3976db7f8abdc83fcc871a3a95186/src/s2/s2coords.h#L338-L341
-    st = (_s2_si_ti_to_st(si), _s2_si_ti_to_st(ti))  # pylint: disable=invalid-name
+    st = (_s2_si_ti_to_st(si), _s2_si_ti_to_st(ti))
 
     # Project cell-space ST to cube-space UV
     # See s2geometry/blob/c59d0ca01ae3976db7f8abdc83fcc871a3a95186/src/s2/s2coords.h#L312-L315
-    uv = (_s2_st_to_uv(st[0]), _s2_st_to_uv(st[1]))  # pylint: disable=invalid-name
+    uv = (_s2_st_to_uv(st[1]), _s2_st_to_uv(st[2]))
 
     # Convert face + UV to S2Point XYZ
-
     # See s2geometry/blob/c59d0ca01ae3976db7f8abdc83fcc871a3a95186/src/s2/s2coords.h#L348-L357
     s2_point = _s2_face_uv_to_xyz(face, uv)
 
@@ -585,10 +577,10 @@ function cell_id_to_lat_lon(cell_id:: Int):: Tuple
 
     # Map into lat/lon
     # See s2geometry/blob/c59d0ca01ae3976db7f8abdc83fcc871a3a95186/src/s2/s2latlng.h#L196-L205
-    lat_rad = math.atan2(s2_point[2], sqrt(s2_point[0]^2 + s2_point[1]^2))
-    lon_rad = math.atan2(s2_point[1], s2_point[0])
+    lat_rad = atan(s2_point[3], sqrt(s2_point[1]^2 + s2_point[2]^2))
+    lon_rad = atan(s2_point[2], s2_point[1])
 
-    return (math.degrees(lat_rad), math.degrees(lon_rad))
+    return (rad2deg(lat_rad), rad2deg(lon_rad))
 end
 
 md"""
@@ -609,10 +601,10 @@ Raises:
     InvalidCellID: If the contained cell_id is invalid.
 
 """
-function token_to_lat_lon(token:: String)::Tuple
+function token_to_lat_lon(token:: String)::Tuple{<:Real,<:Real}
     # Check input
     if !token_is_valid(token)
-        throw(InvalidToken("Cannot decode invalid S2 token: {}".format(token)))
+        throw(InvalidToken("Cannot decode invalid S2 token: $token"))
     end
 
     # Convert to cell ID and decode to lat/lon
@@ -643,17 +635,17 @@ Returns:
 function token_to_canonical_token(token:: String):: String
     # Convert token to lower case.
     # Note that 'X' below will be returned upper case
-    token = token.lower()
+    token = lowercase(token)
 
     # Strip any surrounding whitespace
-    token = token.strip()
+    token = strip(token)
 
     # Strip any trailing zeros
-    token = token.rstrip("0")
+    token = rstrip(token, '0')
 
-    # If empty string or 'x', return 'X' token
+    # If empty string or "x", return "X" token
     if token in ("", "x")
-        token = 'X'
+        token = "X"
     end
 
     return token
@@ -678,12 +670,24 @@ Raises:
     TypeError: If the cell_id is not int.
 
 """
-function cell_id_is_valid(cell_id:: Int):: Bool
-    # Check input
-    if ! cell_id isa Int
-        throw(TypeError("Cannot decode S2 cell ID from type: {}".format(type(cell_id))))
-    end
+cell_id_is_valid(cell:: Cell):: Bool = cell_id_is_valid(cell.id)
 
+md"""
+Check that a S2 cell ID is valid.
+
+Looks for valid face bits and a trailing 1 bit in one of the correct locations.
+
+Args:
+    cell_id: The S2 cell integer to validate.
+
+Returns:
+    True if the cell ID is valid, False otherwise.
+
+Raises:
+    TypeError: If the cell_id is not int.
+
+"""
+function cell_id_is_valid(cell_id:: Integer):: Bool
     # Check for zero ID
     # This avoids overflow warnings below when 1 gets added to max uint64
     if cell_id == 0
@@ -697,8 +701,8 @@ function cell_id_is_valid(cell_id:: Int):: Bool
 
     # Check trailing 1 bit is in one of the even bit positions allowed for the 30 levels, using the
     # mask: 0b0001010101010101010101010101010101010101010101010101010101010101 = 0x1555555555555555
-    lowest_set_bit = cell_id & (¬cell_id + 1)  # pylint: disable=invalid-unary-operand-type
-    if not lowest_set_bit & 0x1555555555555555
+    lowest_set_bit = cell_id & (~cell_id + 1)
+    if (lowest_set_bit & 0x1555555555555555) == 0
         return false
     end
 
@@ -724,13 +728,8 @@ Raises:
 
 """
 function token_is_valid(token:: String):: Bool
-    # Check input
-    if is(token, String)
-        throw(TypeError("Cannot check S2 token with type: {}".format(type(token))))
-    end
-
     # First check string with regex
-    if !re.match(r"^[0-9a-fA-f]{1,16}$", token)
+    if match(r"^[0-9a-fA-F]{1,16}$", token) === nothing
         return false
     end
 
@@ -758,10 +757,28 @@ Raises:
     InvalidCellID: If the cell_id is invalid.
 
 """
-function cell_id_to_level(cell_id:: Int):: Int
+cell_id_to_level(cell:: Cell):: Integer = cell_id_to_level(cell.id)
+
+md"""
+Get the level for a S2 cell ID.
+
+See s2geometry/blob/c59d0ca01ae3976db7f8abdc83fcc871a3a95186/src/s2/s2cell_id.h#L543-L551
+
+Args:
+    cell_id: The S2 cell ID integer.
+
+Returns:
+    The level of the S2 cell ID.
+
+Raises:
+    TypeError: If the cell_id is not int.
+    InvalidCellID: If the cell_id is invalid.
+
+"""
+function cell_id_to_level(cell_id:: Integer):: Integer
     # Check input
     if ! cell_id_is_valid(cell_id)
-        throw(InvalidCellID("Cannot decode invalid S2 cell ID: {}".format(cell_id)))
+        throw(InvalidCellID("Cannot decode invalid S2 cell ID: $cell_id"))
     end
 
     # Find the position of the lowest set one bit, which will be the trailing one bit. The level is
@@ -772,14 +789,14 @@ function cell_id_to_level(cell_id:: Int):: Int
     # equivalent to the C++20 function std::countr_zero() or the ctz instruction.
     lsb_pos = 0
     while cell_id != 0
-        if cell_id & 1
+        if Bool(cell_id & 1)
             break
         end
         lsb_pos += 1
         cell_id >>= 1
     end
 
-    return int(_S2_MAX_LEVEL - (lsb_pos >> 1))
+    return _S2_MAX_LEVEL - (lsb_pos >> 1)
 end
 
 md"""
@@ -800,10 +817,10 @@ Raises:
     InvalidCellID: If the contained cell_id is invalid.
 
 """
-function token_to_level(token:: String):: Int
+function token_to_level(token:: String):: Integer
     # Check input
     if !token_is_valid(token)
-        throw(InvalidToken("Cannot decode invalid S2 token: {}".format(token)))
+        throw(InvalidToken("Cannot decode invalid S2 token: $token"))
     end
 
     # Convert to cell ID and get the level for that
@@ -834,29 +851,49 @@ Raises:
     ValueError: If level is greater than the provided cell ID level.
 
 """
-function cell_id_to_parent_cell_id(cell_id:: Int, level::Int = -1)::Int
+cell_id_to_parent_cell_id(cell:: Cell, level = nothing)::Integer = cell_id_to_parent_cell_id(cell.id, level)
+
+md"""
+Get the parent cell ID of a S2 cell ID.
+
+Args:
+    cell_id: The S2 cell ID integer.
+    level: The parent level to get the cell ID for. Must be less than or equal to the current
+        level of the provided cell ID. If unspecified, or None, the direct parent cell ID will
+        be returned.
+
+Returns:
+    The parent cell ID at the specified level.
+
+Raises:
+    TypeError: If the cell_id is not int.
+    InvalidCellID: If the cell_id is invalid.
+    ValueError: If cell ID is already level 0 and level is None.
+    ValueError: When level is not an integer, is < 0 or is > 30.
+    ValueError: If level is greater than the provided cell ID level.
+
+"""
+function cell_id_to_parent_cell_id(cell_id:: Integer, level = nothing)::Integer
     # Check input
     if ! cell_id_is_valid(cell_id)
-        throw(InvalidCellID("Cannot decode invalid S2 cell ID: {}".format(cell_id)))
+        throw(InvalidCellID("Cannot decode invalid S2 cell ID: $cell_id"))
     end
 
     # Get current level of the cell ID and check it is suitable with the requested level
     current_level = cell_id_to_level(cell_id)
     if level == -1 && current_level == 0
-        throw(ValueError("Cannot get parent cell ID of a level 0 cell ID"))
+        throw(ArgumentError("Cannot get parent cell ID of a level 0 cell ID"))
     end
-    if level == -1
+    if level === nothing
         level = current_level - 1
     end
 
-    if !isa(level, Int) || level < 0 || level > _S2_MAX_LEVEL
-        throw(ValueError("S2 level must be integer >= 0 and <= 30"))
+    if !(level isa Integer) || level < 0 || level > _S2_MAX_LEVEL
+        throw(ArgumentError("S2 level must be integer >= 0 and <= 30 but was $level"))
     end
 
     if level > current_level
-        throw(ValueError("Cannot get level {} parent cell ID of cell ID with level {}".format(
-            level, current_level
-        )))
+        throw(ArgumentError("Cannot get level $level parent cell ID of cell ID with level $current_level"))
     end
     if level == current_level
         # Requested parent level is current level, return cell ID itself
@@ -897,10 +934,10 @@ Raises:
     ValueError: If level is greater than the provided token level.
 
 """
-function token_to_parent_token(token:: String, level:: Int = nothing)::String
+function token_to_parent_token(token:: String, level = nothing)::String
     # Check input
     if ! token_is_valid(token)
-        throw(InvalidToken("Cannot decode invalid S2 token: {}".format(token)))
+        throw(InvalidToken("Cannot decode invalid S2 token: $token"))
     end
     
     # Convert to cell ID and get parent and convert back to token
@@ -922,7 +959,7 @@ See s2geometry/blob/c59d0ca01ae3976db7f8abdc83fcc871a3a95186/src/s2/s2cell_id.cc
 
 """
 function __init__()
-    #global _S2_LOOKUP_POS, _S2_LOOKUP_IJ  # pylint: disable=global-statement
+    global _S2_LOOKUP_IJ, _S2_LOOKUP_POS
     # Initialise empty lookup tables
     lookup_length = 1 << (2 * _S2_LOOKUP_BITS + 2)  # = 1024
     _S2_LOOKUP_POS = [0 for i in 1:lookup_length]
@@ -954,9 +991,8 @@ function __init__()
                 )
 
                 # Update the orientation with the new sub-cell orientation
-                orientation = orientation ^ _S2_POS_TO_ORIENTATION_MASK[bit_pair + 1]
+                orientation = orientation ⊻ _S2_POS_TO_ORIENTATION_MASK[bit_pair + 1]
             end
-            println(orientation)
                     
             # Shift IJ and position to allow orientation bits in LSBs of lookup
             ij <<= 2
@@ -969,4 +1005,4 @@ function __init__()
     end
 end
 
-end
+end # module
