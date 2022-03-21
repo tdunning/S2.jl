@@ -1,6 +1,7 @@
-module S2Cell
 using Markdown
 using Printf
+
+export S2Cell
 
 md"""Exception type for invalid cell IDs."""
 struct InvalidCellID <: Exception
@@ -13,10 +14,68 @@ struct InvalidToken <: Exception
     msg:: String
 end
 
-md"""An S2 cell ID is an integer we package for type-checing"""
-struct Cell
+md"""An S2 cell ID is an integer we package for type-checking"""
+struct S2Cell <: S2Region
     id::UInt64
 end
+
+md"""
+An S2 cell union is a bunch of S2 cells associated as a single thing.
+
+Such a union can be normalized or not. Normalized means that none of the constituent cells 
+overlap.
+
+In any case, we assume that the cell ids in this union are sorted in numerical order. This
+ordering allows many operations to run very fast.
+"""
+struct S2CellUnion <: S2Region
+    ids::Vector{UInt64}
+    S2CellUnion(contents::Vector{UInt64}) = S2CellUnion(sort(contents))
+    S2CellUnion(contents::Vector{S2Cell}) = S2CellUnion(id.(contents))
+end
+
+md"""
+An S2Region expresses a general region in spherical geometry. This region may be contiguous or not. 
+It can have holes or not. It may be polygonal or not.
+
+The important features of regions are that we can do a number of operations such as detecting
+intersection.
+
+S2Regions should implement the following functions:
+```
+getCapBound(x<:S2Region):: S2Cap 
+
+# Return a bounding latitude-longitude rectangle.
+getRectBound(x<:S2Region):: S2LatLngRect;
+
+# If this method returns true, the region completely contains the given cell. Otherwise, either
+# the region does not contain the cell or the containment relationship could not be determined.
+contains(x<:S2Region, cell::S2Cell)::Bool;
+
+# Returns true if and only if the given point is contained by the region. {@code p} is generally
+# required to be unit length, although some subtypes may relax this restriction.
+contains(x<:S2Region, p::S2Point )::Bool
+
+# If this method returns false, the region does not intersect the given cell. Otherwise, either
+# region intersects the cell, or the intersection relationship could not be determined.
+mayIntersect(cell::S2Cell)::Bool
+```
+"""
+
+export S2Cell, S2CellUnion, cell_id, level, token, parent
+
+S2Cell(token::String) = S2Cell(token_to_cell_id(token))
+S2Cell(lat::Real, lon::Real, level) = S2Cell(lat_lon_to_cell_id(lat, lon, level))
+S2Cell(p::S2Point) = S2Cell(lat_lon_to_cell_id(p.x, p.y, p.z))
+S2Cell(ll::Tuple{<:Real, <:Real}) = S2Cell(ll[1], ll[2])
+
+cell_id(c::S2Cell) = c.id
+level(c::S2Cell) = cell_id_to_level(c.id)
+token(c::S2Cell) = cell_id_to_token(c.id)
+parent(c::S2Cell) = cell_id_to_parent_cell_id(c.id)
+parent(c::S2Cell, level) = cell_id_to_parent_cell_id(c.id, level)
+
+
 
 #
 # S2 base constants needed for cell mapping
@@ -184,7 +243,7 @@ end
 
 
 #
-# Cell ID <-> Token translation functions
+# S2Cell ID <-> Token translation functions
 #
 
 md"""
@@ -205,7 +264,7 @@ Raises:
     TypeError: If the cell_id is not int.
 
 """
-cell_id_to_token(cell:: Cell)::String = cell_id_to_token(cell.id)
+cell_id_to_token(cell:: S2Cell)::String = cell_id_to_token(cell.id)
 
 function cell_id_to_token(cell_id:: UInt64)::String
     # The zero token is encoded as 'X' rather than as a zero-length string
@@ -235,7 +294,7 @@ Raises:
     InvalidToken: If the token length is over 16.
 
 """
-function token_to_cell_id(token:: String)::Cell
+function token_to_cell_id(token:: String)::UInt64
     if length(token) == 0 || length(token) > 16
         throw(InvalidToken("Cannot convert S2 token with length > 16 characters"))
     end
@@ -243,14 +302,14 @@ function token_to_cell_id(token:: String)::Cell
     # Check for the zero cell ID represented by the character 'x' or 'X' rather than as the empty
     # string
     if lowercase(token) == "x"
-        return Cell(0)
+        return 0
     end
 
     # Add stripped implicit zeros to create the full 16 character hex string
     token = token * ('0' ^ (16 - length(token)))
 
     # Convert to cell ID by converting hex to int
-    return Cell(parse(UInt64, "0x" * token))
+    return parse(UInt64, "0x" * token)
 end
 
 #
@@ -274,7 +333,7 @@ Raises:
     ValueError: When level is not an integer, is < 0 or is > 30.
 
 """
-function lat_lon_to_cell_id(lat :: Real, lon :: Real, level :: Integer = 30)::Cell 
+function lat_lon_to_cell_id(lat :: Real, lon :: Real, level :: Integer = 30)::UInt64
     if level < 0 || level > _S2_MAX_LEVEL
         throw(ArgumentError("S2 level must be integer >= 0 and <= 30"))
     end
@@ -409,7 +468,7 @@ function lat_lon_to_cell_id(lat :: Real, lon :: Real, level :: Integer = 30)::Ce
     least_significant_bit_mask = 1 << (2 * (_S2_MAX_LEVEL - level))
     cell_id = (cell_id & -least_significant_bit_mask) | least_significant_bit_mask
 
-    return Cell(cell_id)
+    return cell_id
 end
 
 md"""
@@ -457,7 +516,7 @@ Raises:
     InvalidCellID: If the cell_id is invalid.
 
 """
-cell_id_to_lat_lon(cell:: Cell):: Tuple{<:Real, <:Real} = cell_id_to_lat_lon(cell.id)
+cell_id_to_lat_lon(cell:: S2Cell):: Tuple{<:Real, <:Real} = cell_id_to_lat_lon(cell.id)
 
 function cell_id_to_lat_lon(cell_id:: UInt64):: Tuple{<:Real, <:Real}
     # Check input
@@ -544,7 +603,7 @@ function cell_id_to_lat_lon(cell_id:: UInt64):: Tuple{<:Real, <:Real}
     # _S2_MAX_SI_TI. The extra power of 2 over IJ allows for identifying both the center and edge of
     # cells, whilst IJ is just the leaf cells.
     # See s2geometry/blob/c59d0ca01ae3976db7f8abdc83fcc871a3a95186/src/s2/s2coords.h#L57-L65
-    is_leaf = Bool(cell_id & 1)  # Cell is leaf cell when trailing one bit is in LSB
+    is_leaf = Bool(cell_id & 1)  # S2Cell is leaf cell when trailing one bit is in LSB
     apply_correction = !is_leaf && Bool((i ⊻ (cell_id >> 2)) & 1)
     if is_leaf
         correction_delta = 1
@@ -670,7 +729,7 @@ Raises:
     TypeError: If the cell_id is not int.
 
 """
-cell_id_is_valid(cell:: Cell):: Bool = cell_id_is_valid(cell.id)
+cell_id_is_valid(cell:: S2Cell):: Bool = cell_id_is_valid(cell.id)
 
 md"""
 Check that a S2 cell ID is valid.
@@ -757,7 +816,7 @@ Raises:
     InvalidCellID: If the cell_id is invalid.
 
 """
-cell_id_to_level(cell:: Cell):: Integer = cell_id_to_level(cell.id)
+cell_id_to_level(cell:: S2Cell):: Int = cell_id_to_level(cell.id)
 
 md"""
 Get the level for a S2 cell ID.
@@ -851,7 +910,7 @@ Raises:
     ValueError: If level is greater than the provided cell ID level.
 
 """
-cell_id_to_parent_cell_id(cell:: Cell, level = nothing)::Integer = cell_id_to_parent_cell_id(cell.id, level)
+cell_id_to_parent_cell_id(cell:: S2Cell, level = nothing)::Integer = cell_id_to_parent_cell_id(cell.id, level)
 
 md"""
 Get the parent cell ID of a S2 cell ID.
@@ -1005,4 +1064,3 @@ function __init__()
     end
 end
 
-end # module
