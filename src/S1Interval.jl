@@ -58,7 +58,7 @@ md"""The full interval"""
 full(T::Type{S1Interval}) = S1Interval(-S2_M_PI, S2_M_PI, true)
 
 md"Construct an interval containing a single point"
-function fromPoint(p::Number) 
+function fromPoint(::Type{S1Interval}, p::Number) 
     if p == -S2_M_PI
         p = S2_M_PI
     end
@@ -71,7 +71,7 @@ Convenience method to construct the minimal interval containing the two given po
 equivalent to starting with an empty interval and calling addPoint() twice, but it is more
 efficient.
 """
-function fromPointPair(p1::Number, p2::Number)::S1Interval 
+function fromPointPair(::Type{S1Interval}, p1::Number, p2::Number)::S1Interval 
     if (p1 == -S2_M_PI) 
         p1 = S2_M_PI
     end
@@ -300,7 +300,7 @@ function addPoint(a::S1Interval, p::Number)
     end
 
     if isempty(a)
-        return fromPoint(p)
+        return fromPoint(S1Interval, p)
     else
         # Compute distance from p to each endpoint.
         dlo = positiveDistance(p, a.lo)

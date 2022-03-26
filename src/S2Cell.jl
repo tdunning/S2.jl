@@ -43,10 +43,9 @@ intersection.
 
 S2Regions should implement the following functions:
 ```
-getCapBound(x<:S2Region):: S2Cap 
+bound(S2Cap, x<:S2Region)
+bound(S2LatLngRect, x<:S2Region)
 
-# Return a bounding latitude-longitude rectangle.
-getRectBound(x<:S2Region):: S2LatLngRect;
 
 # If this method returns true, the region completely contains the given cell. Otherwise, either
 # the region does not contain the cell or the containment relationship could not be determined.
@@ -62,12 +61,11 @@ mayIntersect(cell::S2Cell)::Bool
 ```
 """
 
-export S2Cell, S2CellUnion, cell_id, level, token, parent
-
 S2Cell(token::String) = S2Cell(token_to_cell_id(token))
-S2Cell(lat::Real, lon::Real, level) = S2Cell(lat_lon_to_cell_id(lat, lon, level))
-S2Cell(p::S2Point) = S2Cell(lat_lon_to_cell_id(p.x, p.y, p.z))
-S2Cell(ll::Tuple{<:Real, <:Real}) = S2Cell(ll[1], ll[2])
+S2Cell(lat::Real, lon::Real, level=30) = S2Cell(lat_lon_to_cell_id(lat, lon, level))
+S2Cell(p::Vector, level=30) = S2Cell(S2LatLng(p), level)
+S2Cell(ll::Tuple{<:Real, <:Real}, level=30) = S2Cell(ll[1], ll[2], level)
+S2Cell(ll::S2LatLng, level=30) = S2Cell(ll.lat, ll.lng, level)
 
 cell_id(c::S2Cell) = c.id
 level(c::S2Cell) = cell_id_to_level(c.id)

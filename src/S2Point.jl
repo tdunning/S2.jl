@@ -41,7 +41,12 @@ verifyPoint(a::Vector) = (length(a) == 3 && eltype(a) <: Number) || throw(Argume
 
 coordinates(a::Vector) = verifyPoint(a) && (a[1], a[2], a[3])
 
-getCapBound(a::Vector) = verifyPoint(a) && S2Cap(a, S1ChordAngle(0))
+md"""
+Bounding shapes of all kinds are found using the same function `bound`. The first
+argument determines what kind of bound you want.
+"""
+bound(::Type{S2Cap}, a::Vector) = verifyPoint(a) && S2Cap(a, S1ChordAngle(0))
+bound(::Type{S2LatLngRect}, a::Vector) = verifyPoint(a) && fromPoint(S2LatLngRect, S2LatLng(a))
 
 norm2(a::Vector) = sum(a.^2)
 
@@ -105,4 +110,48 @@ md"""
 The angle in radians between two points
 """
 Base.angle(a::Vector, b::Vector) = atan(norm(a × b), a ⋅ b)
+
+md"""
+Return a vector `c` that is orthogonal to the given unit-length vectors `a` and `b`. This
+function is similar to `a × b` except that it does a better job of ensuring
+orthogonality when `a` is nearly parallel to `b`, and it returns a non-zero result even 
+when `a == b` or `a == -b`.
+
+It satisfies the following properties (RCP == robustCrossProd):
+
+1. `RCP(a,b) != 0` for all `a, b`
+2. `RCP(b,a) == -RCP(a,b)` unless `a == b` or `a == -b`
+3. `RCP(-a,b) == -RCP(a,b)` unless `a == b` or `a == -b`
+4. `RCP(a,-b) == -RCP(a,b)` unless `a == b` or `a == -b`
+"""
+function robustCrossProd(a::Vector, b::Vector)
+    (verifyPoint(a) && verifyPoint(b)) || throw(ArgumentError("Need valid points as args"))
+    # The direction of `a × b` becomes unstable as `a + b` or `a - b`
+    # approaches zero.  This leads to situations where `a × b` is not
+    # very orthogonal to `a` and/or `b`.  We could fix this using Gram-Schmidt,
+    # but we also want `robustCrossProd(b, a) == -robustCrossProd(a, b)`.
+    #
+    # The easiest fix is to just compute the cross product of `(b+a)` and `(b-a)`.
+    # Mathematically, this cross product is exactly twice the cross product of
+    # `a` and `b`, but it has the numerical advantage that `b+a` and `b-a`
+    # are always perpendicular (since `a`and `b` are unit length).  This
+    # yields a result that is nearly orthogonal to both `a` and `b` even if
+    # these two values differ only in the lowest bit of one component.
+    # assert (isUnitLength(a) && isUnitLength(b));
+    x = (a + b) × (b - a)
+    if x != ORIGIN
+        return x
+    else
+        return ortho(a)
+    end
+end
+
+#md"Returns the R3 vector cross product of `p1` and `p2`"
+#function LinearAlgebra.cross(p1::Vector,  p2::Vector)
+#    (verifyPoint(a) && verifyPoint(b)) || throw(ArgumentError("Need valid points as args"))
+#    return S2Point(
+#        p1.y * p2.z - p1.z * p2.y,
+#        p1.z * p2.x - p1.x * p2.z,
+#        p1.x * p2.y - p1.y * p2.x)
+#end
 

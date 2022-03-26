@@ -16,8 +16,8 @@
 # This class represents a point on the unit sphere as a pair of latitude-longitude coordinates.
 
 struct S2LatLng
-    latRadians::Float64
-    lngRadians::Float64
+    lat::Float64
+    lng::Float64
 end
 
 S2LatLng(lat::S1Angle, lon::S1Angle) = S2LatLng(radians(lat), radians(lon))
@@ -27,7 +27,7 @@ radians2LL(lat::Number, lon::Number) = S2LatLng(lat, lon)
 deg2LL(lat::Number, lon::Number) = S2LatLng(deg2rad(lat), deg2rad(lon))
 
 latitude(p::Vector) = verifyPoint(p) && S1Angle(atan(p[3], hypot(p[1], p[2])))
-latitude(p::S2LatLng) = S1Angle(p.latRadians)
+latitude(p::S2LatLng) = S1Angle(p.lat)
 longitude(p::Vector) = verifyPoint(p) && S1Angle(atan(p[2], p[1]))
 longitude(p::S2LatLng) = S1Angle(p.lngRadians)
 
@@ -41,13 +41,13 @@ true}.
 f the current point is valid then the returned point will have the same coordinates.
 """
 function LinearAlgebra.normalize(p::S2LatLng)::S2LatLng
-    S2LatLng(max(-π, min(π, p.latRadians)),
-             normalizeRange(p.lngRadians))
+    S2LatLng(max(-π, min(π, p.lat)),
+             normalizeRange(p.lng))
 end
 
 function S2Point(ll::S2LatLng) 
-    ϕ = ll.latRadians
-    θ = lngRadians
+    ϕ = ll.lat
+    θ = ll.lng
     cosphi = cos(ϕ)
     return S2Point(cos(θ) * cosphi, sin(θ) * cosphi, sin(ϕ))
 end
@@ -61,7 +61,7 @@ alternative is to convert to S2Points and then to S1Angle to get 15 digits of ac
 for all distances.  
 """
 function distance(a::S2LatLng, b::S2LatLng)
-    dlat = Math.sin(0.5 * (a.latRadians - b.latRadians))
+    dlat = Math.sin(0.5 * (a.lat - b.latRadians))
     dlng = Math.sin(0.5 * (a.lngRadians - b.lngRadians))
     x = dlat * dlat + dlng * dlng * cos(a.latRadians) * cos(b.latRadians)
     return S1Angle.radians(2 * asin(sqrt(min(1.0, x))))

@@ -72,17 +72,15 @@ Returns the angle normalized to the range (-180, 180] degrees.
 """
 normalizeRange(a::S1Angle) = S1Angle(normalizeRange(a.radians))
 
-function normalizeRange(r:: Number)
-    if -π < r ≤ π
-        return r
+function normalizeRange(r::Number) 
+    x = rem(r, 2π, RoundNearest)
+    if x ≤ -S2_M_PI
+        return S2_M_PI
     else
-        b = r - 2π * floor(r / (2π))
-        if b ≤ π
-            return b
-        else
-            return b - 2π
-        end
+        return x
     end
 end
+
+
 
 

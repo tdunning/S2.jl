@@ -71,24 +71,25 @@ end
 begin
     point = normalize(randn(3))
     expectedCapBound = S2Cap(point, S1ChordAngle(0))
-    @test expectedCapBound == getCapBound(point)
+    @test expectedCapBound == bound(S2Cap, point)
     
     ll = S2LatLng(point)
-    @test S2LatLngRect(ll, ll) == getRectBound(point)
+    @test fromPointPair(S2LatLngRect, ll, ll) == bound(S2LatLngRect, point)
+    @test fromPoint(S2LatLngRect, ll) == bound(S2LatLngRect, point)
     
     # The leaf cell containing a point is still much larger than the point.
     cell = S2Cell(point)
-    @test !(point.contains(cell))
-    @test point.mayIntersect(cell)
+    @test !(contains(point, cell))
+    @test mayIntersect(point, cell)
 end
 
-let points = [S2Point("0:0"), S2Point("1:1"), S2Point("2:2")]
-    for j = 0:(length(points)-1]
-        subset = points[0:(j-1)]
-        S2Shape shape = S2Point.Shape.fromList(subset);
-        @test !(shape.containsOrigin());
-        @test !(shape.hasInterior());
-        @test length(subset) == shape.numEdges()
-    end
-end
+# let points = [S2Point("0:0"), S2Point("1:1"), S2Point("2:2")]
+#     for j = 0:(length(points)-1]
+#         subset = points[0:(j-1)]
+#         S2Shape shape = S2Point.Shape.fromList(subset);
+#         @test !(containsOrigin(shape);
+#         @test !(hasInterior(shape));
+#         @test length(subset) == numEdges(shape)
+#     end
+# end
 
